@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>electribe sampler · replica interattiva</title>
+<style>
+  :root { color-scheme: dark; font-family: Arial, Helvetica, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; background: radial-gradient(circle at 50% 35%, #404047, #17171c 75%); display: grid; place-items: center; overflow: hidden; }
+  #wrap { width: min(96vw, 177.8vh); aspect-ratio: 1000 / 560; position: relative; }
+  #panel { position: absolute; inset: 0; overflow: hidden; border-radius: 2.8% / 5%; border: .65vw solid #68233a; background: linear-gradient(112deg, #983c59 0%, #862a48 19%, #a13b5c 49%, #b45b77 82%, #8c314f 100%); box-shadow: inset 0 2px 3px #dd9aab88, inset 0 -10px 12px #4a1429aa, 0 24px 45px #0008; user-select: none; touch-action: none; }
+  #panel::before { content: ""; pointer-events: none; position: absolute; inset: 1.2% 1%; border: 1px solid #ffffff21; border-radius: 2%; background: linear-gradient(#fff2 0%, transparent 23%, #0001 100%); }
+  .element { position: absolute; transform: translate(-50%, -50%); }
+  .label { position: absolute; transform: translate(-50%, -50%); color: #f2dfde; text-align: center; white-space: nowrap; font-size: clamp(4px, .62vw, 8px); text-shadow: 0 1px 1px #4a1526; pointer-events: none; line-height: 1; }
+  .group { font-weight: 600; font-size: clamp(6px, .85vw, 11px); }
+  .brand { font-weight: 700; font-size: clamp(10px, 1.45vw, 19px); letter-spacing: -.04em; }
+  .korg { font-weight: 900; font-size: clamp(13px, 1.8vw, 24px); letter-spacing: -.06em; }
+  .rule { position: absolute; height: .45%; background: #f0cbd188; border-radius: 5px; }
+  button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .knob { width: 4.75%; aspect-ratio: 1; padding: 0; border: 1px solid #562b3c; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ada4a5 0%, #898182 48%, #544f54 80%, #29252e 100%); box-shadow: 1px 2px 3px #341021cc, inset 0 1px 2px #e8e3df8f; touch-action: none; }
+  .knob.big { width: 5.55%; }
+  .knob.small { width: 4.05%; }
+  .knob::after { content: ""; position: absolute; width: 8%; height: 28%; left: 46%; top: 8%; border-radius: 2px; background: #e7d9d9; box-shadow: 0 0 2px white; transform-origin: 50% 151%; transform: rotate(var(--angle)); }
+  .knob:focus-visible, .btn:focus-visible, .pad:focus-visible { outline: 2px solid #e9e1d0; outline-offset: 2px; }
+  .btn { padding: 0; color: #eee9e5; border: 1px solid #542436; border-radius: 10%; background: linear-gradient(#a9949a, #7e6974 48%, #594c58 52%, #725b65); box-shadow: 0 2px 2px #341022, inset 0 1px 1px #e2c9ce99; font-size: clamp(3px,.48vw,7px); line-height: 1; }
+  .btn:active, .btn.pressed { transform: translate(-50%, -47%); box-shadow: 0 0 1px #30131c, inset 0 2px 2px #322027; }
+  .btn.active { background: linear-gradient(#ffc7bd, #dc5448 55%, #a52a39); box-shadow: 0 0 7px #ff776a, inset 0 1px #fff8; }
+  .btn.active.green { background: linear-gradient(#d9ffde, #61cf86 55%, #278257); box-shadow: 0 0 7px #88fca4; }
+  .btn.round { border-radius: 50%; }
+  .btn.oval { border-radius: 30%; }
+  .btn.tiny { border-radius: 20%; }
+  #displayBezel { position: absolute; left: 5.4%; top: 17%; width: 20.2%; height: 19.5%; border: .45vw solid #5b2739; background: linear-gradient(145deg,#685363,#3c343c); box-shadow: inset 1px 2px 4px #160e18, 0 1px 1px #eaa8b988; }
+  #display { position: absolute; inset: 12% 8%; background: linear-gradient(#07191c,#10272c); border: 1px solid #1f151c; color: #c5ede5; font: clamp(5px, 1vw, 13px)/1.45 monospace; padding: 3% 4%; white-space: pre; overflow: hidden; text-shadow: 0 0 3px #a5fff4; }
+  #display small { display: block; color: #82b5b5; font-size: 75%; }
+  #touch { position: absolute; left: 5.4%; top: 62%; width: 20.2%; height: 31%; border: .5vw solid #553041; background: linear-gradient(145deg,#12151a,#22252b 60%,#11151a); box-shadow: inset 2px 3px 7px #000b, 0 1px 1px #eaa0b477; touch-action: none; cursor: crosshair; }
+  #touchDot { position: absolute; width: 9%; aspect-ratio: 1; border-radius: 50%; background: #e9feff; box-shadow: 0 0 12px 6px #a6f5ff, 0 0 26px 12px #60d8ff77; transform: translate(-50%,-50%); opacity: 0; transition: opacity .35s; pointer-events: none; }
+  #touchDot.on { opacity: .9; transition: opacity .06s; }
+  .pad { width: 6.75%; height: 12.1%; border-radius: 9%; padding: 0; border: 2px solid #5a343f; background: linear-gradient(145deg,#696b6e 0%,#56585e 50%,#3c3e46 100%); box-shadow: inset 1px 2px 2px #9b9298, inset -2px -3px 3px #242531, 0 2px 2px #4e192a; }
+  .pad.hit, .pad.step-on { background: linear-gradient(145deg,#ffaca3,#a74c56 55%,#6b333e); box-shadow: 0 0 12px #ff6e73, inset 1px 2px #ffd0c5; }
+  .pad.current { outline: 3px solid #d7fff2; outline-offset: -4px; box-shadow: 0 0 12px #8effdc; }
+  .pad.selected { border-color: #dbedcf; }
+  #status { position: absolute; bottom: -7%; width: 100%; color: #eee; font-size: 12px; text-align: center; }
+  #status.error { color: #ffd1c9; }
+  #listenHere { position: fixed; right: 16px; bottom: 16px; z-index: 20; min-height: 44px; padding: 10px 16px; border: 1px solid #d5a5b5; border-radius: 12px; background: #70283f; color: white; box-shadow: 0 5px 18px #0008; font-size: 14px; font-weight: 700; }
+  #listenHere.active { background: #276e4b; border-color: #a8e3c1; }
+  #audioHint { position: fixed; right: 16px; bottom: 65px; z-index: 20; max-width: 280px; color: white; background: #25232bcc; border-radius: 7px; padding: 4px 8px; font-size: 11px; text-align: right; }
+  @media(max-width:700px) { #wrap { width: 98vw; } #status { font-size: 9px; bottom: -12%; } .btn { font-size: 3px; } }
+</style>
+</head>
+<body>
+<main id="wrap" aria-label="Replica interattiva Korg electribe sampler">
+  <div id="panel">
+    <div id="displayBezel"><div id="display">001  INIT PATTERN<small>PART 01  KICK</small></div></div>
+    <div id="touch" role="slider" tabindex="0" aria-label="Touch pad"><div id="touchDot"></div></div>
+  </div>
+  <div id="status">Connessione al motore audio…</div>
+</main>
+<div id="audioHint" aria-live="polite">L’audio esce dal Mac finché non tocchi il pulsante.</div>
+<button id="listenHere" type="button">🔊 Ascolta su questo dispositivo</button>
+<input id="wavInput" type="file" accept=".wav,audio/wav" hidden>
+<script>
+/* La foto è 447×447: il pannello occupa circa x=30..420, y=118..335.
+   Le coordinate qui sotto ricostruiscono quel rettangolo; le scritte più piccole
+   sono approssimate perché il riferimento non permette di leggerle con certezza. */
+const panel = document.querySelector('#panel');
+const display = document.querySelector('#display');
+const touch = document.querySelector('#touch');
+const dot = document.querySelector('#touchDot');
+const status = document.querySelector('#status');
+const wavInput = document.querySelector('#wavInput');
+const listenHere = document.querySelector('#listenHere');
+const audioHint = document.querySelector('#audioHint');
+const knobs = new Map(), buttons = new Map(), pads = [];
+const draggingKnobs = new Set();
+const state = { values:{}, mode:'touch_scale', sequencer:false, part:0, step:-1 };
+let socket, touchPointer = null, lastPad = 0;
+let audioSocket, audioContext, audioStartTime = 0, audioRate = 44100, audioWanted = false, audioLastError = '';
+const pct = (n, axis) => `${n / (axis === 'x' ? 1000 : 560) * 100}%`;
+function position(el,x,y,w,h) {
+  el.style.left=pct(x,'x'); el.style.top=pct(y,'y');
+  if(w) el.style.width=pct(w,'x'); if(h) el.style.height=pct(h,'y');
+}
+function label(text,x,y,cls='') {
+  const el=document.createElement('span'); el.className='label '+cls;
+  el.textContent=text; position(el,x,y); panel.append(el); return el;
+}
+function rule(x,y,w) { const el=document.createElement('div'); el.className='rule'; el.style.left=pct(x,'x'); el.style.top=pct(y,'y'); el.style.width=pct(w,'x'); panel.append(el); }
+function send(data) { if(socket?.readyState===WebSocket.OPEN) socket.send(JSON.stringify(data)); }
+function notice(a,b) { display.innerHTML=''; display.append(document.createTextNode(a)); const small=document.createElement('small'); small.textContent=b; display.append(small); }
+function knob(id,x,y,name,initial=.5,size='') {
+  const el=document.createElement('button'); el.type='button'; el.className='element knob '+size;
+  el.setAttribute('aria-label',name); el.title=name; if(id==='bpm'){el.setAttribute('aria-valuemin','40');el.setAttribute('aria-valuemax','240');} position(el,x,y); panel.append(el);
+  label(name,x,y+34); knobs.set(id,{el,name,value:initial,initial});
+  setKnob(id,initial,false);
+  let startY,startV,pointer;
+  el.addEventListener('pointerdown',e=>{ e.preventDefault(); pointer=e.pointerId; startY=e.clientY; startV=knobs.get(id).value; draggingKnobs.add(id); el.setPointerCapture(pointer); });
+  el.addEventListener('pointermove',e=>{ if(e.pointerId===pointer) setKnob(id,startV+(startY-e.clientY)/150,true); });
+  el.addEventListener('pointerup',e=>{ if(e.pointerId===pointer) { pointer=null; setTimeout(()=>draggingKnobs.delete(id),150); } });
+  el.addEventListener('pointercancel',()=>{pointer=null; draggingKnobs.delete(id);});
+  el.addEventListener('wheel',e=>{e.preventDefault();setKnob(id,knobs.get(id).value+(e.deltaY<0?.025:-.025),true);},{passive:false});
+  el.addEventListener('dblclick',()=>setKnob(id,initial,true));
+  el.addEventListener('keydown',e=>{ if(e.key==='ArrowUp'||e.key==='ArrowRight'||e.key==='ArrowDown'||e.key==='ArrowLeft') { e.preventDefault(); setKnob(id,knobs.get(id).value+(['ArrowUp','ArrowRight'].includes(e.key)?.02:-.02),true); } });
+}
+function setKnob(id,value,emit) { const item=knobs.get(id); if(!item)return; item.value=Math.max(0,Math.min(1,value)); item.el.style.setProperty('--angle',`${-135+270*item.value}deg`); const shown=id==='bpm'?Math.round(40+item.value*200):Math.round(item.value*127); item.el.setAttribute('aria-valuenow',shown); if(emit){send({type:'knob',id,value:item.value});notice(item.name.toUpperCase(),id==='bpm'?`${shown} BPM`:String(shown).padStart(3,'0'));} }
+function button(id,x,y,w,h,text='',cls='tiny') {
+  const el=document.createElement('button'); el.type='button'; el.className='element btn '+cls;
+  el.setAttribute('aria-label',id.replaceAll('_',' ')); el.title=id.replaceAll('_',' '); el.textContent=text;
+  position(el,x,y,w,h); panel.append(el); buttons.set(id,el);
+  el.addEventListener('click',()=>{el.classList.add('pressed');setTimeout(()=>el.classList.remove('pressed'),130);if(id==='sample_edit') { assignSample(); return; } send({type:'button',id});});
+  return el;
+}
+function pad(index,x,y) {
+  const el=document.createElement('button'); el.type='button'; el.className='element pad'; el.setAttribute('aria-label',`Pad ${index+1}`); el.title=`Pad ${index+1}`; position(el,x,y); panel.append(el); pads.push(el);
+  el.addEventListener('pointerdown',e=>{e.preventDefault();const r=el.getBoundingClientRect();const dx=(e.clientX-r.left-r.width/2)/(r.width/2),dy=(e.clientY-r.top-r.height/2)/(r.height/2);const velocity=Math.max(.2,1-.55*Math.min(1,Math.hypot(dx,dy)));lastPad=index;send({type:'pad',index,velocity,down:true});el.classList.add('hit');});
+  const release=()=>{send({type:'pad',index,down:false});setTimeout(()=>el.classList.remove('hit'),170);};
+  el.addEventListener('pointerup',release);el.addEventListener('pointercancel',release);
+}
+// Marchio e comandi nella fascia superiore.
+label('electribe sampler',742,31,'brand');label('KORG',919,30,'korg');
+label('POWER',76,29);label('VOLUME',146,29);label('INPUT LEVEL',213,29);
+button('power',76,62,30,30,'','round');knob('volume',146,62,'Volume',.7,'small');knob('input_level',213,62,'Input Level',.5,'small');
+// Trasporto a sinistra, in due file come nel riferimento.
+[['rec',76],['play',126],['stop',176],['tap',226]].forEach(([id,x])=>{button(id,x,247,40,33,id==='play'?'▶':id==='rec'?'●':id==='stop'?'■':'TAP','oval');label(id==='play'?'PLAY/PAUSE':id.toUpperCase(),x,275);});
+[['shift',76],['exit',126],['write',176],['enter',226]].forEach(([id,x])=>button(id,x,296,39,17,id.toUpperCase()));
+// Gruppi di manopole: due livelli visivi e i tasti delle funzioni sottostanti.
+[['Sample',435],['Filter',558],['Modulation',681],['Amp/EG',790],['Insert Fx',914]].forEach(([name,x])=>label(name,x,84,'group'));
+rule(389,96,90);rule(513,96,92);rule(632,96,99);rule(749,96,84);rule(870,96,86);
+knob('sample',331,123,'Sample',.5,'big');knob('pitch',435,123,'Pitch',.5);
+knob('cutoff',558,123,'Cutoff',.75);knob('lfo_rate',681,123,'Rate',.3);
+knob('level',761,123,'Level',.8,'small');knob('attack',839,123,'Attack',0,'small');knob('fx_depth',917,123,'FX Depth',.2);
+knob('resonance',435,187,'Resonance',.2,'small');knob('filter_type',515,187,'Filter Type',0,'small');
+knob('lfo_depth',598,187,'LFO Depth',0,'small');knob('lfo_shape',680,187,'LFO Shape',0,'small');
+knob('pan',760,187,'Pan',.5,'small');knob('decay',839,187,'Decay',.45,'small');knob('fx_time',917,187,'FX Time',.35,'small');
+knob('bpm',434,248,'BPM',.4,'small');knob('swing',681,248,'Swing',0,'small');
+button('part_prev',331,186,47,19,'◀ PART');button('part_next',331,218,47,19,'PART ▶');
+[['pattern',331],['sample_edit',381],['filter',515],['mod',598],['amp',760],['fx',839],['motion',917]].forEach(([id,x])=>button(id,x,247,42,19,id.toUpperCase()));
+// File di pulsanti stretti sopra i pad. Alcuni nomi sono ricostruiti dalla serie electribe.
+[['gate_arp',330],['touch_scale',380],['master_fx',430],['mfx_hold',480],['sequencer',530],['trigger',580],['part_mute',630],['part_erase',680],['part_copy',730],['part_paste',780],['shift_mode',830],['menu',880],['cursor',930]].forEach(([id,x])=>button(id,x,296,44,17,id==='gate_arp'?'GATE':id==='touch_scale'?'SCALE':id==='master_fx'?'MFX':id==='sequencer'?'SEQ':id==='mfx_hold'?'HOLD':id.replace('part_','').toUpperCase()));
+label('GATE ARP',330,320);label('TOUCH SCALE',382,320);label('MASTER FX',433,320);label('MFX HOLD',480,320);
+// Tre pulsanti verticali sul margine destro, separati dalla fila orizzontale.
+[['cursor_up',882,'▲'],['cursor_down',927,'▼'],['value',972,'+']].forEach(([id,x,text])=>button(id,x,336,18,28,text,'oval'));
+// Matrice 2×8, corrispondente ai sedici pad della foto.
+for(let i=0;i<16;i++) pad(i,320+(i%8)*86,397+Math.floor(i/8)*86);
+function touchEvent(e,down){ const r=touch.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));const y=Math.max(0,Math.min(1,1-(e.clientY-r.top)/r.height));dot.style.left=`${x*100}%`;dot.style.top=`${(1-y)*100}%`;dot.classList.toggle('on',down);send({type:'touch',x,y,down}); if(down) notice(`X ${x.toFixed(2)}  Y ${y.toFixed(2)}`,state.mode.replaceAll('_',' ').toUpperCase()); }
+touch.addEventListener('pointerdown',e=>{e.preventDefault();if(touchPointer!==null)return;touchPointer=e.pointerId;touch.setPointerCapture(e.pointerId);touchEvent(e,true);});
+touch.addEventListener('pointermove',e=>{if(e.pointerId===touchPointer)touchEvent(e,true);});
+function releaseTouch(e){if(e.pointerId!==touchPointer)return;touchEvent(e,false);touchPointer=null;}
+touch.addEventListener('pointerup',releaseTouch);touch.addEventListener('pointercancel',releaseTouch);
+touch.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();send({type:'touch',x:.5,y:.7,down:true});setTimeout(()=>send({type:'touch',x:.5,y:.7,down:false}),200);}});
+const keys='12345678qwertyui';const held=new Set();
+document.addEventListener('keydown',e=>{if(e.repeat||e.target.tagName==='INPUT')return;const i=keys.indexOf(e.key.toLowerCase());if(i<0)return;e.preventDefault();held.add(i);lastPad=i;send({type:'pad',index:i,velocity:.85,down:true});pads[i].classList.add('hit');});
+document.addEventListener('keyup',e=>{const i=keys.indexOf(e.key.toLowerCase());if(i<0||!held.has(i))return;held.delete(i);send({type:'pad',index:i,down:false});pads[i].classList.remove('hit');});
+function render(data){ if(data.type==='error'){status.textContent=data.message;status.classList.add('error');return;} if(data.type!=='state')return;
+  Object.assign(state,data); if(!draggingKnobs.has('bpm'))notice(data.display[0]||'',data.display[1]||'');
+  for(const [id,value] of Object.entries(data.values||{}))if(knobs.has(id)&&!draggingKnobs.has(id))setKnob(id,value,false);
+  for(const [id,el] of buttons){const active=id==='play'?data.playing:id==='rec'?data.recording:id==='power'?data.powered:id==='fx'?data.fx_kind==='distortion':id==='sequencer'?data.sequencer:id==='shift_mode'?data.pad_mode==='part_select':id==='part_mute'?data.muted?.[data.part]:id==='motion'?data.motion_enabled:id==='shift'?data.shift:id==='menu'?data.menu_open:id==='pattern'?data.pattern_select:id==='mfx_hold'?data.hold:id===data.mode;el.classList.toggle('active',!!active);el.classList.toggle('green',id==='play'&&!!active);}
+  pads.forEach((el,i)=>{el.classList.toggle('step-on',!!(data.sequencer&&data.steps[i]));el.classList.toggle('current',!!(data.playing&&data.step===i));el.classList.toggle('selected',!!(data.pad_mode==='part_select'&&data.part===i));});
+  const visibleBpm=draggingKnobs.has('bpm')?Math.round(40+knobs.get('bpm').value*200):data.bpm;
+  status.classList.toggle('error',!!data.audio_error);status.textContent=data.audio_error||`Connesso · Pattern ${data.pattern_index} · ${visibleBpm} BPM · Parte ${data.part+1} · ${data.pad_mode==='part_select'?'Selezione parti':data.sequencer?'Sequencer':'Trigger'} · ${data.input_enabled?'Ingresso attivo':'Ingresso non disponibile'}`;
+}
+async function assignSample(){
+  if(location.protocol==='file:'){status.textContent='Avvia il server per assegnare i WAV';return;}
+  try{
+    const res=await fetch('/api/samples'); const files=await res.json();
+    if(!files.length){wavInput.click();return;}
+    const filename=prompt(`Pad ${lastPad+1}: scrivi un nome WAV oppure IMPORTA per scegliere un file.\nDisponibili:\n${files.join('\n')}`,files[0]);
+    if(!filename)return;
+    if(filename.trim().toUpperCase()==='IMPORTA'){wavInput.click();return;}
+    const assigned=await fetch('/api/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:lastPad,filename})});
+    const result=await assigned.json();
+    if(!assigned.ok)throw Error(result.detail||'Assegnazione fallita');
+    render(result);
+  }catch(error){status.textContent=String(error);status.classList.add('error');}
+}
+wavInput.addEventListener('change',async()=>{
+  const file=wavInput.files?.[0]; if(!file)return;
+  const targetPad=lastPad; wavInput.value='';
+  try{
+    const response=await fetch(`/api/upload/${encodeURIComponent(file.name)}?index=${targetPad}`,{method:'POST',headers:{'Content-Type':'audio/wav'},body:file});
+    const result=await response.json();
+    if(!response.ok)throw Error(result.detail||'Caricamento WAV fallito');
+    render(result);
+  }catch(error){status.textContent=String(error);status.classList.add('error');}
+});
+function connect(){socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);socket.onmessage=e=>{try{render(JSON.parse(e.data));}catch(err){console.error(err);}};socket.onclose=()=>{status.textContent='Connessione persa. Riconnessione…';status.classList.add('error');setTimeout(connect,1500);};socket.onerror=()=>{status.textContent='Avvia il backend: uvicorn main:app';status.classList.add('error');};}
+function playRemoteBlock(bytes){
+  if(!audioContext || audioContext.state!=='running')return;
+  const samples=new DataView(bytes), frames=Math.floor(samples.byteLength/4);
+  if(!frames)return;
+  const buffer=audioContext.createBuffer(2,frames,audioRate);
+  const left=buffer.getChannelData(0), right=buffer.getChannelData(1);
+  for(let i=0;i<frames;i++){left[i]=samples.getInt16(i*4,true)/32768;right[i]=samples.getInt16(i*4+2,true)/32768;}
+  const now=audioContext.currentTime;
+  if(audioStartTime<now-.03)audioStartTime=now+.11;
+  if(audioStartTime>now+.45)return; // Evita che il ritardo aumenti se la rete rallenta.
+  const source=audioContext.createBufferSource(); source.buffer=buffer; source.connect(audioContext.destination);
+  source.start(audioStartTime); audioStartTime+=buffer.duration;
+  source.onended=()=>source.disconnect();
+}
+async function stopLocalAudio(){
+  audioWanted=false;
+  if(audioSocket){audioSocket.close();audioSocket=null;}
+  if(audioContext){const old=audioContext;audioContext=null;await old.close();}
+  audioStartTime=0;
+  listenHere.classList.remove('active');
+  listenHere.textContent='🔊 Ascolta su questo dispositivo';
+  audioHint.textContent='Ascolto sul dispositivo disattivato.';
+}
+listenHere.addEventListener('click',async()=>{
+  if(audioWanted){
+    if(audioContext?.state!=='running'){await audioContext.resume();listenHere.textContent='■ Ferma audio qui';audioHint.textContent='Audio riattivato.';return;}
+    await stopLocalAudio();return;
+  }
+  if(location.protocol==='file:'){audioHint.textContent='Apri la pagina tramite il server Python per ascoltare.';return;}
+  const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+  if(!AudioContextClass){audioHint.textContent='Questo browser non supporta Web Audio.';return;}
+  try{
+    audioContext=new AudioContextClass({latencyHint:'interactive'});
+    const unlock=audioContext.createBufferSource();unlock.buffer=audioContext.createBuffer(1,1,audioContext.sampleRate);unlock.connect(audioContext.destination);unlock.start();
+    await audioContext.resume();
+    audioWanted=true;audioLastError='';listenHere.classList.add('active');listenHere.textContent='■ Ferma audio qui';audioHint.textContent='Connessione audio in corso…';
+    audioSocket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/audio`);
+    audioSocket.binaryType='arraybuffer';
+    audioSocket.onmessage=e=>{
+      if(typeof e.data==='string'){
+        const message=JSON.parse(e.data);
+        if(message.type==='audio_format'){audioRate=message.rate;audioHint.textContent='Audio ricevuto su questo dispositivo. Il Mac può suonare insieme.';}
+        else if(message.type==='audio_error'){audioLastError=message.message;audioHint.textContent=message.message;}
+      }else playRemoteBlock(e.data);
+    };
+    audioSocket.onclose=()=>{if(audioWanted){stopLocalAudio().then(()=>{audioHint.textContent=audioLastError||'Audio scollegato: tocca il pulsante per riprovare.';});}};
+  }catch(error){await stopLocalAudio();audioHint.textContent=`Impossibile avviare l’audio: ${error}`;}
+});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&audioWanted&&audioContext?.state!=='running'){listenHere.textContent='▶ Riprendi audio qui';audioHint.textContent='Tocca per riattivare l’audio.';}});
+// Aprendo il file direttamente si vede il pannello; per audio e stato serve il server.
+if(location.protocol==='file:'){status.textContent='Interfaccia pronta · Per audio e sequencer avvia: uvicorn main:app';status.classList.add('error');}else connect();
+</script>
+</body>
+</html>
