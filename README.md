@@ -1,6 +1,8 @@
 # electribe sampler — replica interattiva
 
-Replica ispirata alla foto fornita. Il pannello è in `static/index.html` (HTML, CSS e JavaScript vanilla); WebSocket, clock, sequencer e sintesi audio sono in Python. Non è un'emulazione completa del firmware Korg.
+Replica ispirata alla foto fornita. Il pannello è in `static/index.html` (HTML, CSS e JavaScript vanilla); WebSocket, clock, sequencer e sintesi audio sono in Python. Non è un'emulazione completa del firmware Korg. Il confronto puntuale con il manuale ufficiale e i limiti sono in [MANUALE_IMPLEMENTAZIONE.md](MANUALE_IMPLEMENTAZIONE.md).
+
+Per tutti i comandi, i pattern, i WAV e la soluzione dei problemi audio, consulta la [guida completa](GUIDA.md).
 
 ## Prima prova
 
@@ -25,7 +27,7 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-L'audio esce dal computer che esegue il server. Per ascoltarlo anche sul dispositivo che apre la pagina, tocca **Ascolta su questo dispositivo**. Aprendo direttamente `static/index.html` si vede il pannello, ma audio e sequencer richiedono il server. Se non senti nulla, controlla uscita audio, tasto Power e manopola Volume. Se il display segnala un errore audio, verifica che sia disponibile un dispositivo di uscita. La manopola Input Level richiede anche un ingresso audio disponibile.
+L'audio esce dal computer che esegue il server. Per ascoltarlo anche sul dispositivo che apre la pagina, tocca **Ascolta su questo dispositivo**. Aprendo direttamente `static/index.html` si vede il pannello, ma audio e sequencer richiedono il server. Se non senti nulla, controlla uscita audio, tasto Power e manopola Volume. Se il display segnala un errore audio, verifica che sia disponibile un dispositivo di uscita. Il microfono resta spento all'avvio: **Attiva microfono** apre l'ingresso del computer solo quando lo chiedi; **Input Level** ne regola il monitoraggio.
 
 ## Ascolto su iPad
 
@@ -38,19 +40,13 @@ Il computer può suonare insieme all'iPad; abbassa il suo volume se senti un dop
 
 ## Uso
 
-- Trascinare le manopole verso l'alto o il basso, usare la rotella oppure i tasti freccia. Doppio clic per il valore iniziale.
-- Suonare i pad con mouse, tocco o tastiera: `1`–`8` per la prima riga, `Q W E R T Y U I` per la seconda.
-- `SEQ` mostra gli step della parte selezionata. Un clic cambia lo step; `PLAY` avvia il clock, `STOP` lo ferma, `REC` registra i colpi suonati sulla posizione corrente. `◀ PART` e `PART ▶` cambiano parte.
-- `GATE`, `SCALE`, `MFX` selezionano la funzione del touch pad. `HOLD` mantiene l'effetto MFX dopo il rilascio.
-- `TAP` calcola il BPM dalla cadenza dei clic. Anche la manopola BPM lo modifica. La manopola Swing varia il tempo degli step alterni.
-- Il tasto `FX` alterna delay e distorsione; la manopola FX Depth regola l'effetto scelto. `POWER` silenzia il motore e ferma il sequencer.
-- I tre pulsanti verticali a destra sono `▲` e `▼` per scorrere parametri o slot dei pattern, e `+` per cambiare il valore. `SHIFT` insieme a `+` diminuisce il valore. `MENU` apre l'elenco; `FILTER`, `MOD` e `AMP` aprono direttamente la rispettiva sezione. `ENTER` conferma o carica il pattern selezionato; `EXIT` chiude il menu.
-- `PART SELECT` trasforma i pad in selettori delle 16 parti. `MUTE` silenzia la parte nel sequencer. `COPY` e `PASTE` duplicano gli step; `ERASE` cancella quelli della parte. `SHIFT` + `ERASE` cancella gli step di tutte le parti. `MOTION` attiva la registrazione e riproduzione dei movimenti delle manopole sugli step; spegnendolo si disattiva l'automazione. La riproduzione modifica il suono, senza muovere graficamente le manopole manuali.
-- `WRITE` salva il pattern nello slot corrente in `patterns/`. `PATTERN` apre gli slot 1–16; usare `▲`/`▼` e `ENTER` per ricaricare uno slot, oppure `WRITE` per salvare in quello selezionato.
-- Per usare campioni personali, toccare il pad da assegnare e premere `SAMPLE_EDIT`: si può scegliere un WAV già presente in `samples/` oppure importarne uno dal dispositivo. Sono accettati WAV PCM non compressi fino a 20 secondi e 20 MB.
+- Suona i 16 pad con mouse, tocco o tastiera: `1`–`8` e `Q W E R T Y U I`.
+- I pulsanti **TRIGGER, SEQUENCER, KEYBOARD, CHORD, STEP JUMP** e **PATTERN SET** cambiano la funzione dei pad. I quattro pulsanti numerati selezionano l'ottava o il gruppo di pattern, secondo la modalità.
+- **LPF, HPF e BPF** scelgono il filtro; **MFX SEND, AMP EG e IFX ON** attivano le rispettive funzioni audio della replica.
+- Apri **Funzioni SimKorg** per importare WAV, scegliere pattern e usare i comandi aggiuntivi. La [guida completa](GUIDA.md) spiega ogni modalità e la registrazione.
 
-La manopola `Input Level` regola il monitoraggio dell'ingresso audio del computer che esegue il server, se il dispositivo audio lo consente. La scritta minuta e alcune posizioni sono approssimate perché la foto da 447×447 pixel non consente di distinguerle con precisione. Le funzioni implementate sono una replica d'uso, non una copia del firmware Korg.
+La manopola `Input Level` regola il monitoraggio dell'ingresso audio del computer che esegue il server, quando il microfono è stato attivato esplicitamente e il dispositivo audio lo consente. Il pannello segue la foto `korg2.jpg`; le funzioni implementate sono una replica d'uso, non una copia del firmware Korg.
 
 ## Protocollo
 
-`/ws` riceve eventi JSON `knob`, `pad`, `touch` e `button`; invia `state` con BPM, step, parte, modalità, LED, valori e due righe del display. `/audio` invia PCM stereo 16 bit/44,1 kHz al browser; l'interfaccia lo riproduce senza sintetizzarlo. `GET /api/samples` elenca i WAV; `POST /api/assign` associa un file a un pad; `POST /api/upload/{filename}?index=N` importa e associa un WAV.
+`/ws` riceve eventi JSON `knob`, `pad`, `touch`, `button` e `value`; invia `state` con BPM, step, parte, modalità, LED, valori e due righe del display. `/audio` invia PCM stereo 16 bit/44,1 kHz al browser; l'interfaccia lo riproduce senza sintetizzarlo. `GET /api/samples` elenca i WAV; `POST /api/assign` associa un file a un pad; `POST /api/upload/{filename}?index=N` importa e associa un WAV.

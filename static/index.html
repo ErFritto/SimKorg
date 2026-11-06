@@ -8,7 +8,7 @@
   :root { color-scheme: dark; font-family: Arial, Helvetica, sans-serif; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100dvh; background: radial-gradient(circle at 50% 35%, #404047, #17171c 75%); display: grid; place-items: center; overflow: hidden; }
-  #wrap { width: min(96vw, 177.8vh); aspect-ratio: 1000 / 560; position: relative; }
+  #wrap { width: min(96vw, 136vh); aspect-ratio: 1000 / 560; position: relative; }
   #panel { position: absolute; inset: 0; overflow: hidden; border-radius: 2.8% / 5%; border: .65vw solid #68233a; background: linear-gradient(112deg, #983c59 0%, #862a48 19%, #a13b5c 49%, #b45b77 82%, #8c314f 100%); box-shadow: inset 0 2px 3px #dd9aab88, inset 0 -10px 12px #4a1429aa, 0 24px 45px #0008; user-select: none; touch-action: none; }
   #panel::before { content: ""; pointer-events: none; position: absolute; inset: 1.2% 1%; border: 1px solid #ffffff21; border-radius: 2%; background: linear-gradient(#fff2 0%, transparent 23%, #0001 100%); }
   .element { position: absolute; transform: translate(-50%, -50%); }
@@ -40,12 +40,21 @@
   .pad.hit, .pad.step-on { background: linear-gradient(145deg,#ffaca3,#a74c56 55%,#6b333e); box-shadow: 0 0 12px #ff6e73, inset 1px 2px #ffd0c5; }
   .pad.current { outline: 3px solid #d7fff2; outline-offset: -4px; box-shadow: 0 0 12px #8effdc; }
   .pad.selected { border-color: #dbedcf; }
-  #status { position: absolute; bottom: -7%; width: 100%; color: #eee; font-size: 12px; text-align: center; }
+  .pad.muted { opacity: .42; }
+  #status { position: absolute; bottom: -4%; width: 100%; color: #eee; font-size: 12px; text-align: center; }
   #status.error { color: #ffd1c9; }
   #listenHere { position: fixed; right: 16px; bottom: 16px; z-index: 20; min-height: 44px; padding: 10px 16px; border: 1px solid #d5a5b5; border-radius: 12px; background: #70283f; color: white; box-shadow: 0 5px 18px #0008; font-size: 14px; font-weight: 700; }
   #listenHere.active { background: #276e4b; border-color: #a8e3c1; }
+  #microphone { position: fixed; left: 16px; bottom: 16px; z-index: 20; min-height: 44px; padding: 10px 16px; border: 1px solid #d5a5b5; border-radius: 12px; background: #70283f; color: white; box-shadow: 0 5px 18px #0008; font-size: 14px; font-weight: 700; }
+  #microphone.active { background: #276e4b; border-color: #a8e3c1; }
   #audioHint { position: fixed; right: 16px; bottom: 65px; z-index: 20; max-width: 280px; color: white; background: #25232bcc; border-radius: 7px; padding: 4px 8px; font-size: 11px; text-align: right; }
-  @media(max-width:700px) { #wrap { width: 98vw; } #status { font-size: 9px; bottom: -12%; } .btn { font-size: 3px; } }
+  #extras { position: fixed; left: 16px; top: 16px; z-index: 30; max-width: min(440px, 92vw); color: #fff; background: #28232ce8; border: 1px solid #a4778a; border-radius: 9px; padding: 7px 10px; font-size: 12px; }
+  #extras summary { cursor: pointer; font-weight: 700; }
+  #extraControls { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 9px; }
+  #extraControls button { color: white; background: #70283f; border: 1px solid #b88a9c; border-radius: 5px; padding: 5px 7px; }
+  #extraControls button.active { background: #276e4b; }
+  #extraControls label { display: flex; align-items: center; gap: 4px; }
+  @media(max-width:700px) { #wrap { width: 98vw; } #status { font-size: 9px; bottom: -12%; } .btn { font-size: 3px; } #microphone { bottom: 70px; } #audioHint { bottom: 122px; } }
 </style>
 </head>
 <body>
@@ -56,13 +65,13 @@
   </div>
   <div id="status">Connessione al motore audio…</div>
 </main>
-<div id="audioHint" aria-live="polite">L’audio esce dal Mac finché non tocchi il pulsante.</div>
+<details id="extras"><summary>Funzioni SimKorg</summary><div id="extraControls"></div></details>
+<div id="audioHint" aria-live="polite">L’audio esce dal computer che esegue il server finché non tocchi il pulsante.</div>
+<button id="microphone" type="button" aria-pressed="false">🎙 Attiva microfono</button>
 <button id="listenHere" type="button">🔊 Ascolta su questo dispositivo</button>
 <input id="wavInput" type="file" accept=".wav,audio/wav" hidden>
 <script>
-/* La foto è 447×447: il pannello occupa circa x=30..420, y=118..335.
-   Le coordinate qui sotto ricostruiscono quel rettangolo; le scritte più piccole
-   sono approssimate perché il riferimento non permette di leggerle con certezza. */
+/* Coordinate riferite al pannello della foto korg2.jpg. */
 const panel = document.querySelector('#panel');
 const display = document.querySelector('#display');
 const touch = document.querySelector('#touch');
@@ -70,7 +79,9 @@ const dot = document.querySelector('#touchDot');
 const status = document.querySelector('#status');
 const wavInput = document.querySelector('#wavInput');
 const listenHere = document.querySelector('#listenHere');
+const microphone = document.querySelector('#microphone');
 const audioHint = document.querySelector('#audioHint');
+const extraControls = document.querySelector('#extraControls');
 const knobs = new Map(), buttons = new Map(), pads = [];
 const draggingKnobs = new Set();
 const state = { values:{}, mode:'touch_scale', sequencer:false, part:0, step:-1 };
@@ -87,6 +98,7 @@ function label(text,x,y,cls='') {
 }
 function rule(x,y,w) { const el=document.createElement('div'); el.className='rule'; el.style.left=pct(x,'x'); el.style.top=pct(y,'y'); el.style.width=pct(w,'x'); panel.append(el); }
 function send(data) { if(socket?.readyState===WebSocket.OPEN) socket.send(JSON.stringify(data)); }
+microphone.addEventListener('click',()=>send({type:'button',id:'input_monitor'}));
 function notice(a,b) { display.innerHTML=''; display.append(document.createTextNode(a)); const small=document.createElement('small'); small.textContent=b; display.append(small); }
 function knob(id,x,y,name,initial=.5,size='') {
   const el=document.createElement('button'); el.type='button'; el.className='element knob '+size;
@@ -110,6 +122,30 @@ function button(id,x,y,w,h,text='',cls='tiny') {
   el.addEventListener('click',()=>{el.classList.add('pressed');setTimeout(()=>el.classList.remove('pressed'),130);if(id==='sample_edit') { assignSample(); return; } send({type:'button',id});});
   return el;
 }
+function extraButton(id,text) {
+  const el=document.createElement('button');el.type='button';el.textContent=text;el.title=text;
+  el.addEventListener('click',()=>id==='sample_edit'?assignSample():send({type:'button',id}));
+  extraControls.append(el);buttons.set(id,el);return el;
+}
+function extraRange(id,name,min,max,initial) {
+  const label=document.createElement('label');label.textContent=name;
+  const input=document.createElement('input');input.type='range';input.min=min;input.max=max;input.value=initial;
+  input.addEventListener('input',()=>send({type:'knob',id,value:Number(input.value)/100}));
+  label.append(input);extraControls.append(label);return input;
+}
+function valueKnob(x,y) {
+  const el=document.createElement('button');el.type='button';el.className='element knob small';el.title='Value: trascina o usa la rotella';el.setAttribute('aria-label','Value');
+  el.style.setProperty('--angle','0deg');
+  position(el,x,y);panel.append(el);label('VALUE',x,y+34);
+  let pointer=null,lastY=0,acc=0,angle=0;
+  function turn(delta){if(!delta)return;send({type:'value',delta});angle+=delta*18;el.style.setProperty('--angle',`${angle}deg`);}
+  el.addEventListener('pointerdown',e=>{e.preventDefault();pointer=e.pointerId;lastY=e.clientY;acc=0;el.setPointerCapture(pointer);});
+  el.addEventListener('pointermove',e=>{if(e.pointerId!==pointer)return;acc+=(lastY-e.clientY)/12;lastY=e.clientY;const n=Math.trunc(acc);acc-=n;turn(n);});
+  el.addEventListener('pointerup',e=>{if(e.pointerId===pointer)pointer=null;});
+  el.addEventListener('pointercancel',()=>{pointer=null;});
+  el.addEventListener('wheel',e=>{e.preventDefault();turn(e.deltaY<0?1:-1);},{passive:false});
+  el.addEventListener('keydown',e=>{if(['ArrowUp','ArrowRight','ArrowDown','ArrowLeft'].includes(e.key)){e.preventDefault();turn(['ArrowUp','ArrowRight'].includes(e.key)?1:-1);}});
+}
 function pad(index,x,y) {
   const el=document.createElement('button'); el.type='button'; el.className='element pad'; el.setAttribute('aria-label',`Pad ${index+1}`); el.title=`Pad ${index+1}`; position(el,x,y); panel.append(el); pads.push(el);
   el.addEventListener('pointerdown',e=>{e.preventDefault();const r=el.getBoundingClientRect();const dx=(e.clientX-r.left-r.width/2)/(r.width/2),dy=(e.clientY-r.top-r.height/2)/(r.height/2);const velocity=Math.max(.2,1-.55*Math.min(1,Math.hypot(dx,dy)));lastPad=index;send({type:'pad',index,velocity,down:true});el.classList.add('hit');});
@@ -120,26 +156,46 @@ function pad(index,x,y) {
 label('electribe sampler',742,31,'brand');label('KORG',919,30,'korg');
 label('POWER',76,29);label('VOLUME',146,29);label('INPUT LEVEL',213,29);
 button('power',76,62,30,30,'','round');knob('volume',146,62,'Volume',.7,'small');knob('input_level',213,62,'Input Level',.5,'small');
-// Trasporto a sinistra, in due file come nel riferimento.
-[['rec',76],['play',126],['stop',176],['tap',226]].forEach(([id,x])=>{button(id,x,247,40,33,id==='play'?'▶':id==='rec'?'●':id==='stop'?'■':'TAP','oval');label(id==='play'?'PLAY/PAUSE':id.toUpperCase(),x,275);});
-[['shift',76],['exit',126],['write',176],['enter',226]].forEach(([id,x])=>button(id,x,296,39,17,id.toUpperCase()));
-// Gruppi di manopole: due livelli visivi e i tasti delle funzioni sottostanti.
-[['Sample',435],['Filter',558],['Modulation',681],['Amp/EG',790],['Insert Fx',914]].forEach(([name,x])=>label(name,x,84,'group'));
-rule(389,96,90);rule(513,96,92);rule(632,96,99);rule(749,96,84);rule(870,96,86);
-knob('sample',331,123,'Sample',.5,'big');knob('pitch',435,123,'Pitch',.5);
-knob('cutoff',558,123,'Cutoff',.75);knob('lfo_rate',681,123,'Rate',.3);
-knob('level',761,123,'Level',.8,'small');knob('attack',839,123,'Attack',0,'small');knob('fx_depth',917,123,'FX Depth',.2);
-knob('resonance',435,187,'Resonance',.2,'small');knob('filter_type',515,187,'Filter Type',0,'small');
-knob('lfo_depth',598,187,'LFO Depth',0,'small');knob('lfo_shape',680,187,'LFO Shape',0,'small');
-knob('pan',760,187,'Pan',.5,'small');knob('decay',839,187,'Decay',.45,'small');knob('fx_time',917,187,'FX Time',.35,'small');
-knob('bpm',434,248,'BPM',.4,'small');knob('swing',681,248,'Swing',0,'small');
-button('part_prev',331,186,47,19,'◀ PART');button('part_next',331,218,47,19,'PART ▶');
-[['pattern',331],['sample_edit',381],['filter',515],['mod',598],['amp',760],['fx',839],['motion',917]].forEach(([id,x])=>button(id,x,247,42,19,id.toUpperCase()));
-// File di pulsanti stretti sopra i pad. Alcuni nomi sono ricostruiti dalla serie electribe.
-[['gate_arp',330],['touch_scale',380],['master_fx',430],['mfx_hold',480],['sequencer',530],['trigger',580],['part_mute',630],['part_erase',680],['part_copy',730],['part_paste',780],['shift_mode',830],['menu',880],['cursor',930]].forEach(([id,x])=>button(id,x,296,44,17,id==='gate_arp'?'GATE':id==='touch_scale'?'SCALE':id==='master_fx'?'MFX':id==='sequencer'?'SEQ':id==='mfx_hold'?'HOLD':id.replace('part_','').toUpperCase()));
-label('GATE ARP',330,320);label('TOUCH SCALE',382,320);label('MASTER FX',433,320);label('MFX HOLD',480,320);
-// Tre pulsanti verticali sul margine destro, separati dalla fila orizzontale.
-[['cursor_up',882,'▲'],['cursor_down',927,'▼'],['value',972,'+']].forEach(([id,x,text])=>button(id,x,336,18,28,text,'oval'));
+// Trasporto e touch pad.
+[['rec',76],['stop',126],['play',176],['tap',226]].forEach(([id,x])=>button(id,x,280,40,35,id==='play'?'▶❚❚':id==='rec'?'●':id==='stop'?'■':'TAP','oval'));
+[['gate_arp',76,'GATE ARP'],['touch_scale',126,'TOUCH SCALE'],['master_fx',176,'MASTER FX'],['mfx_hold',226,'MFX HOLD']].forEach(([id,x,text])=>button(id,x,326,43,19,text));
+// Common: Value, cursori, Menu/Enter, Exit, Shift e Write.
+valueKnob(331,135);
+button('cursor_up',311,210,42,20,'‹');button('cursor_down',361,210,42,20,'›');
+button('enter',311,246,42,20,'MENU/ENTER');button('exit',361,246,42,20,'EXIT');
+button('shift',311,281,42,20,'SHIFT');button('write',361,281,42,20,'WRITE');
+// Sezioni dei parametri.
+[['Sample',435],['Filter',558],['Modulation',681],['Amp/EG',800],['Insert Fx',924]].forEach(([name,x])=>label(name,x,84,'group'));
+rule(396,96,78);rule(513,96,92);rule(632,96,99);rule(749,96,101);rule(878,96,91);
+knob('sample',435,130,'Sample',.5,'big');knob('pitch',435,200,'Pitch/Glide',.5,'small');
+knob('cutoff',558,130,'Filter',.75,'big');knob('resonance',515,200,'Resonance',.2,'small');
+knob('lfo_rate',681,130,'Modulation',.3,'big');knob('lfo_depth',681,200,'Depth',0,'small');knob('lfo_shape',681,268,'Shape',0,'small');
+knob('level',760,130,'Level',.8,'small');knob('pan',840,130,'Pan',.5,'small');
+knob('attack',760,200,'Attack',0,'small');knob('decay',840,200,'Decay/Release',.45,'small');
+knob('fx_depth',925,130,'Insert Fx',.2,'big');knob('fx_time',925,200,'Edit',.35,'small');
+[['lpf',515,'LPF'],['hpf',558,'HPF'],['bpf',601,'BPF'],['mfx_send',760,'MFX SEND'],['amp_eg',840,'AMP EG'],['ifx_on',925,'IFX ON']].forEach(([id,x,text])=>button(id,x,281,42,19,text));
+// Striscia delle modalità dei pad, come nel riferimento.
+[['part_prev',309,'◀ PART'],['part_next',359,'PART ▶'],['part_mute',409,'PART MUTE'],['part_erase',459,'PART ERASE'],['trigger',509,'TRIGGER'],['sequencer',559,'SEQUENCER'],['keyboard',609,'KEYBOARD'],['chord',659,'CHORD'],['step_jump',709,'STEP JUMP'],['pattern_set',759,'PATTERN SET']].forEach(([id,x,text])=>button(id,x,328,47,20,text));
+// Quattro pulsanti step a destra.
+for(let i=1;i<=4;i++)button(`step_group_${i}`,805+i*43,328,25,28,String(i),'oval');
+// Comandi aggiuntivi della replica che non compaiono nella foto.
+[['sample_edit','Importa WAV'],['pattern','Pattern'],['part_copy','Copia parte'],['part_paste','Incolla parte'],['motion','Motion'],['fx','Delay / Distorsione'],['shift_mode','Seleziona parte']].forEach(([id,text])=>extraButton(id,text));
+function patternSetting(id,title,options){
+  const label=document.createElement('label');label.textContent=title;
+  const select=document.createElement('select'); select.setAttribute('aria-label',title);
+  for(const [value,text] of options){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
+  select.addEventListener('change',()=>send({type:'setting',id,value:select.value}));
+  label.append(select);extraControls.append(label);return select;
+}
+const lengthSetting=patternSetting('length','Battute',[[1,'1'],[2,'2'],[3,'3'],[4,'4']]);
+const keySetting=patternSetting('key','Tonalità',['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'].map((name,index)=>[index,name]));
+const scaleSetting=patternSetting('scale','Scala',[['ionian','Maggiore'],['minor','Minore'],['pentatonic','Pentatonica'],['chromatic','Cromatica']]);
+const levelSetting=patternSetting('pattern_level','Livello pattern',Array.from({length:11},(_,i)=>[(i/10).toFixed(1),`${i*10}%`]));
+const metronomeSetting=patternSetting('metronome','Metronomo',[['off','Spento'],['on','Sempre'],['record','Solo REC']]);
+const sampleStartSetting=patternSetting('sample_start','Inizio sample',Array.from({length:11},(_,i)=>[(i/10).toFixed(1),`${i*10}%`]));
+const sampleReverseSetting=patternSetting('sample_reverse','Sample',[['0','Avanti'],['1','Reverse']]);
+const bpmExtra=extraRange('bpm','BPM',0,100,40);
+const swingExtra=extraRange('swing','Swing',0,100,0);
 // Matrice 2×8, corrispondente ai sedici pad della foto.
 for(let i=0;i<16;i++) pad(i,320+(i%8)*86,397+Math.floor(i/8)*86);
 function touchEvent(e,down){ const r=touch.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));const y=Math.max(0,Math.min(1,1-(e.clientY-r.top)/r.height));dot.style.left=`${x*100}%`;dot.style.top=`${(1-y)*100}%`;dot.classList.toggle('on',down);send({type:'touch',x,y,down}); if(down) notice(`X ${x.toFixed(2)}  Y ${y.toFixed(2)}`,state.mode.replaceAll('_',' ').toUpperCase()); }
@@ -154,10 +210,16 @@ document.addEventListener('keyup',e=>{const i=keys.indexOf(e.key.toLowerCase());
 function render(data){ if(data.type==='error'){status.textContent=data.message;status.classList.add('error');return;} if(data.type!=='state')return;
   Object.assign(state,data); if(!draggingKnobs.has('bpm'))notice(data.display[0]||'',data.display[1]||'');
   for(const [id,value] of Object.entries(data.values||{}))if(knobs.has(id)&&!draggingKnobs.has(id))setKnob(id,value,false);
-  for(const [id,el] of buttons){const active=id==='play'?data.playing:id==='rec'?data.recording:id==='power'?data.powered:id==='fx'?data.fx_kind==='distortion':id==='sequencer'?data.sequencer:id==='shift_mode'?data.pad_mode==='part_select':id==='part_mute'?data.muted?.[data.part]:id==='motion'?data.motion_enabled:id==='shift'?data.shift:id==='menu'?data.menu_open:id==='pattern'?data.pattern_select:id==='mfx_hold'?data.hold:id===data.mode;el.classList.toggle('active',!!active);el.classList.toggle('green',id==='play'&&!!active);}
-  pads.forEach((el,i)=>{el.classList.toggle('step-on',!!(data.sequencer&&data.steps[i]));el.classList.toggle('current',!!(data.playing&&data.step===i));el.classList.toggle('selected',!!(data.pad_mode==='part_select'&&data.part===i));});
-  const visibleBpm=draggingKnobs.has('bpm')?Math.round(40+knobs.get('bpm').value*200):data.bpm;
-  status.classList.toggle('error',!!data.audio_error);status.textContent=data.audio_error||`Connesso · Pattern ${data.pattern_index} · ${visibleBpm} BPM · Parte ${data.part+1} · ${data.pad_mode==='part_select'?'Selezione parti':data.sequencer?'Sequencer':'Trigger'} · ${data.input_enabled?'Ingresso attivo':'Ingresso non disponibile'}`;
+  for(const [id,el] of buttons){const active=id==='play'?data.playing:id==='rec'?data.recording:id==='power'?data.powered:id==='fx'?data.fx_kind==='distortion':id==='shift_mode'?data.pad_mode==='part_select':id==='motion'?data.motion_enabled:id==='shift'?data.shift:id==='enter'?data.menu_open:id==='pattern'?data.pattern_select:id==='mfx_hold'?data.hold:id==='mfx_send'?data.mfx_send:id==='amp_eg'?data.amp_eg:id==='ifx_on'?data.ifx_on:id==='lpf'?data.values?.filter_type<.25:id==='hpf'?data.values?.filter_type>=.25&&data.values?.filter_type<.75:id==='bpf'?data.values?.filter_type>=.75:id.startsWith('step_group_')?Number(id.slice(-1))===data.step_group:id===data.pad_mode||id===data.mode;el.classList.toggle('active',!!active);el.classList.toggle('green',id==='play'&&!!active);}
+  pads.forEach((el,i)=>{el.classList.toggle('step-on',!!((data.sequencer&&data.steps[i])||(data.pad_mode==='pattern_set'&&data.pattern_set_slots?.[i])));el.classList.toggle('current',!!(data.playing&&data.step===(data.step_group-1)*16+i));el.classList.toggle('selected',!!(data.pad_mode==='part_select'&&data.part===i));el.classList.toggle('muted',!!(data.pad_mode==='part_mute'&&data.muted?.[i]));});
+  lengthSetting.value=String(data.length);keySetting.value=String(data.key);scaleSetting.value=data.scale;levelSetting.value=(Math.round(data.pattern_level*10)/10).toFixed(1);
+  metronomeSetting.value=data.metronome;sampleStartSetting.value=(Math.round((data.values?.sample_start||0)*10)/10).toFixed(1);sampleReverseSetting.value=String(Math.round(data.values?.sample_reverse||0));
+  const visibleBpm=data.bpm;
+  bpmExtra.value=Math.round((data.values?.bpm||0)*100);swingExtra.value=Math.round((data.values?.swing||0)*100);
+  microphone.classList.toggle('active',!!data.input_enabled);
+  microphone.setAttribute('aria-pressed',String(!!data.input_enabled));
+  microphone.textContent=data.input_enabled?'🎙 Disattiva microfono':'🎙 Attiva microfono';
+  status.classList.toggle('error',!!(data.audio_error||data.input_error));status.textContent=data.audio_error||data.input_error||`Connesso · Pattern ${data.pattern_index} · ${visibleBpm} BPM · Parte ${data.part+1} · ${data.pad_mode.replaceAll('_',' ')} · Microfono ${data.input_enabled?'attivo':'spento'}`;
 }
 async function assignSample(){
   if(location.protocol==='file:'){status.textContent='Avvia il server per assegnare i WAV';return;}

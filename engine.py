@@ -22,13 +22,19 @@ PAD_COUNT = 16
 BPM_MIN = 40
 BPM_MAX = 240
 SCALE = [0, 3, 5, 7, 10]
+SCALES = {"ionian": (0, 2, 4, 5, 7, 9, 11), "minor": (0, 2, 3, 5, 7, 8, 10),
+          "pentatonic": (0, 3, 5, 7, 10), "chromatic": tuple(range(12))}
+PART_KEYS = {"sample", "pitch", "cutoff", "resonance", "filter_type", "lfo_rate",
+             "lfo_depth", "lfo_shape", "level", "pan", "attack", "decay", "fx_depth", "fx_time",
+             "sample_start", "sample_reverse"}
+PATTERN_COUNT = 250
 DEFAULTS = {
     "volume": .7, "input_level": .5, "sample": .5, "pitch": .5,
     "cutoff": .75, "resonance": .2, "filter_type": 0,
     "lfo_rate": .3, "lfo_depth": 0, "lfo_shape": 0,
     "level": .8, "pan": .5, "attack": 0, "decay": .45,
     "fx_depth": .2, "fx_time": .35, "distortion": 0, "bpm": .4,
-    "swing": 0,
+    "swing": 0, "sample_start": 0, "sample_reverse": 0,
 }
 MENU_FIELDS = [
     ("BPM", "bpm"), ("SWING", "swing"), ("CUTOFF", "cutoff"),
@@ -59,11 +65,17 @@ class Engine:
         self.bpm = 120
         self.step = -1
         self.part = 0
-        self.steps = [[False] * 16 for _ in range(16)]
+        self.length = 1
+        self.key = 0
+        self.scale = "ionian"
+        self.pattern_level = 1.0
+        self.metronome = "off"
+        self.steps = [[False] * 64 for _ in range(16)]
+        self.part_values = [{key: self.values[key] for key in PART_KEYS} for _ in range(16)]
         self.muted = [False] * 16
-        self.copy_buffer: list[bool] | None = None
+        self.copy_buffer: tuple[list[bool], dict[str, float]] | None = None
         self.motion_enabled = False
-        self.motion: list[dict[str, float]] = [{} for _ in range(16)]
+        self.motion: list[dict[str, float]] = [{} for _ in range(64)]
         self.motion_override: dict[str, float] = {}
         self.shift = False
         self.pad_mode = "trigger"
@@ -78,6 +90,12 @@ class Engine:
         self.fx_kind = "delay"
         self.mode = "touch_scale"
         self.sequencer = False
+        self.step_group = 2
+        self.mfx_send = True
+        self.amp_eg = True
+        self.ifx_on = True
+        self.pattern_sets = [[None] * 16 for _ in range(4)]
+        self._load_pattern_sets()
         self.hold = False
         self.touch = None
         self.display = ["001  INIT PATTERN", "PART 01  KICK"]
@@ -99,6 +117,9 @@ class Engine:
         self.last_taps: list[float] = []
         self.running = False
         self.stream = None
+        self.device_lock = threading.Lock()
+        self.input_enabled = False
+        self.input_error = ""
         self.audio_error = ""
         self.next_step = 0.0
         self.last_arp = 0.0
@@ -110,23 +131,57 @@ class Engine:
             self.audio_error = "sounddevice non disponibile"
             return
         try:
-            try:
-                self.stream = sd.Stream(samplerate=RATE, channels=(1, 2), blocksize=512,
-                                        dtype="float32", callback=self._duplex_callback)
-                self.input_enabled = True
-            except Exception:
-                self.stream = sd.OutputStream(samplerate=RATE, channels=2, blocksize=512,
-                                              dtype="float32", callback=self._audio_callback)
-                self.input_enabled = False
+            self.stream = sd.OutputStream(samplerate=RATE, channels=2, blocksize=512,
+                                          dtype="float32", callback=self._audio_callback)
             self.stream.start()
         except Exception as exc:
             self.audio_error = f"Uscita audio non disponibile: {exc}"
 
     def close(self) -> None:
         self.running = False
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
+        with self.device_lock:
+            if self.stream:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
+
+    def set_input_monitor(self, enabled: bool) -> None:
+        """Apre il microfono solo dopo un comando esplicito dell'utente."""
+        with self.device_lock:
+            if enabled == self.input_enabled:
+                return
+            if self.stream:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
+            self.input_enabled = False
+            self.input_error = ""
+            try:
+                if enabled:
+                    self.stream = sd.Stream(samplerate=RATE, channels=(1, 2), blocksize=512,
+                                            dtype="float32", callback=self._duplex_callback)
+                else:
+                    self.stream = sd.OutputStream(samplerate=RATE, channels=2, blocksize=512,
+                                                  dtype="float32", callback=self._audio_callback)
+                self.stream.start()
+                self.input_enabled = enabled
+                self.audio_error = ""
+            except Exception as exc:
+                self.input_error = f"Ingresso audio non disponibile: {exc}" if enabled else ""
+                if self.stream:
+                    self.stream.close()
+                    self.stream = None
+                try:
+                    self.stream = sd.OutputStream(samplerate=RATE, channels=2, blocksize=512,
+                                                  dtype="float32", callback=self._audio_callback)
+                    self.stream.start()
+                    self.audio_error = ""
+                except Exception as output_exc:
+                    self.stream = None
+                    self.audio_error = f"Uscita audio non disponibile: {output_exc}"
+            with self.lock:
+                self._show("MICROFONO", "ATTIVO" if self.input_enabled else
+                           "NON DISPONIBILE" if self.input_error else "SPENTO")
 
     def subscribe_audio(self) -> queue.Queue[bytes]:
         """Un flusso PCM stereo indipendente per ogni browser in ascolto."""
@@ -176,14 +231,20 @@ class Engine:
                     "recording": self.recording, "powered": self.powered,
                     "fx_kind": self.fx_kind, "mode": self.mode,
                     "sequencer": self.sequencer, "pad_mode": self.pad_mode,
+                    "step_group": self.step_group, "mfx_send": self.mfx_send,
+                    "amp_eg": self.amp_eg, "ifx_on": self.ifx_on,
+                    "pattern_set_slots": self.pattern_sets[self.step_group - 1][:],
                     "hold": self.hold, "shift": self.shift,
                     "muted": self.muted[:], "motion_enabled": self.motion_enabled,
                     "menu_open": self.menu_open, "menu_index": self.menu_index,
                     "pattern_select": self.pattern_select,
                     "pattern_index": self.pattern_index,
                     "selected_pattern": self.selected_pattern,
-                    "input_enabled": getattr(self, "input_enabled", False),
-                    "steps": self.steps[self.part][:], "display": self.display[:],
+                    "input_enabled": self.input_enabled, "input_error": self.input_error,
+                    "steps": self.steps[self.part][(self.step_group-1)*16:self.step_group*16],
+                    "length": self.length, "key": self.key, "scale": self.scale,
+                    "pattern_level": self.pattern_level, "display": self.display[:],
+                    "metronome": self.metronome,
                     "values": self.values.copy(), "audio_error": self.audio_error}
 
     def _voice_name(self, index: int) -> str:
@@ -222,6 +283,11 @@ class Engine:
         if not isinstance(msg, dict):
             raise ValueError("Messaggio JSON non valido")
         kind = msg.get("type")
+        if kind == "button" and msg.get("id") == "input_monitor":
+            self.set_input_monitor(not self.input_enabled)
+            return
+        if kind == "button" and msg.get("id") == "power" and self.powered and self.input_enabled:
+            self.set_input_monitor(False)
         with self.lock:
             if kind == "knob":
                 key = str(msg["id"])
@@ -231,6 +297,8 @@ class Engine:
                 if not math.isfinite(value):
                     raise ValueError("Valore non finito")
                 self.values[key] = min(1., max(0., value))
+                if key in PART_KEYS:
+                    self.part_values[self.part][key] = self.values[key]
                 if key == "bpm":
                     self.bpm = bpm_from_value(self.values[key])
                 if self.motion_enabled and self.playing and self.step >= 0 and key not in ("volume", "input_level", "bpm", "swing"):
@@ -245,10 +313,40 @@ class Engine:
                 down = bool(msg.get("down", True))
                 if down:
                     if self.pad_mode == "part_select":
-                        self.part = index
+                        self._select_part(index)
                         self._show("SELECT PART", f"{self.part+1:02d} {self._voice_name(self.part)}")
+                    elif self.pad_mode == "part_mute":
+                        self.muted[index] = not self.muted[index]
+                        self._show(f"PART {index+1:02d}", "MUTED" if self.muted[index] else "UNMUTED")
+                    elif self.pad_mode == "part_erase":
+                        self.steps[index] = [False] * 64
+                        self._show(f"PART {index+1:02d}", "STEPS ERASED")
+                    elif self.pad_mode == "keyboard":
+                        self._play_note(index, float(msg.get("velocity", 1)))
+                        self._show("KEYBOARD", f"NOTE {index+1:02d}")
+                    elif self.pad_mode == "chord":
+                        self._play_note(index, float(msg.get("velocity", 1)), chord=True)
+                        self._show("CHORD", f"PAD {index+1:02d}")
+                    elif self.pad_mode == "step_jump":
+                        if self.playing:
+                            self.step = (self.step_group-1)*16 + index - 1
+                            self.next_step = time.monotonic()
+                        self._show("STEP JUMP", f"STEP {index+1:02d}" if self.playing else "PRESS PLAY FIRST")
+                    elif self.pad_mode == "pattern_set":
+                        group = self.step_group - 1
+                        if self.shift:
+                            self.pattern_sets[group][index] = self.selected_pattern
+                            self._save_pattern_sets()
+                            self._show("PATTERN SET", f"PAD {index+1:02d} = {self.selected_pattern:03d}")
+                        else:
+                            slot = self.pattern_sets[group][index]
+                            if slot is None:
+                                self._show("PATTERN SET", "EMPTY PAD")
+                            else:
+                                self._load_pattern(slot)
                     elif self.sequencer:
-                        self.steps[self.part][index] = not self.steps[self.part][index]
+                        cell = (self.step_group-1)*16 + index
+                        self.steps[self.part][cell] = not self.steps[self.part][cell]
                         self._show(f"PART {self.part+1:02d} STEP {index+1:02d}",
                                    "ON" if self.steps[self.part][index] else "OFF")
                     else:
@@ -283,16 +381,66 @@ class Engine:
                     self.revision += 1
             elif kind == "button":
                 self._button(str(msg["id"]))
+            elif kind == "setting":
+                key, value = str(msg["id"]), msg["value"]
+                if key == "length":
+                    self.length = max(1, min(4, int(value)))
+                elif key == "key":
+                    self.key = max(0, min(11, int(value)))
+                elif key == "scale" and value in SCALES:
+                    self.scale = value
+                elif key == "pattern_level":
+                    self.pattern_level = max(0., min(1., float(value)))
+                elif key == "metronome" and value in ("off", "on", "record"):
+                    self.metronome = value
+                elif key in ("sample_start", "sample_reverse"):
+                    self.values[key] = max(0., min(1., float(value)))
+                    self.part_values[self.part][key] = self.values[key]
+                else:
+                    raise ValueError("Impostazione pattern non valida")
+                self._show(key.upper(), str(self.values[key] if key in ("sample_start", "sample_reverse") else getattr(self, key)))
+            elif kind == "value":
+                delta = int(msg.get("delta", 0))
+                if not self.menu_open and not self.pattern_select:
+                    self.pattern_select = True
+                    self.selected_pattern = self.pattern_index
+                    self._move(delta)
+                else:
+                    self._adjust(delta)
             else:
                 raise ValueError("Tipo evento sconosciuto")
 
+    def _pattern_sets_path(self) -> Path:
+        return self.pattern_dir / "pattern_sets.json"
+
+    def _select_part(self, index: int) -> None:
+        self.part = index % 16
+        self.values.update(self.part_values[self.part])
+        self.revision += 1
+
+    def _load_pattern_sets(self) -> None:
+        try:
+            data = json.loads(self._pattern_sets_path().read_text(encoding="utf-8"))
+            if len(data) == 4 and all(len(group) == 16 for group in data):
+                self.pattern_sets = [[slot if isinstance(slot, int) and 1 <= slot <= PATTERN_COUNT else None
+                                      for slot in group] for group in data]
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def _save_pattern_sets(self) -> None:
+        self._pattern_sets_path().write_text(json.dumps(self.pattern_sets), encoding="utf-8")
+
     def _pattern_path(self, index: int) -> Path:
-        return self.pattern_dir / f"pattern_{index:02d}.json"
+        return self.pattern_dir / f"pattern_{index:03d}.json" if index > 99 else self.pattern_dir / f"pattern_{index:02d}.json"
 
     def _save_pattern(self, index: int) -> None:
         payload = {
-            "version": 1, "steps": self.steps, "muted": self.muted,
+            "version": 2, "steps": self.steps, "muted": self.muted,
             "values": self.values, "fx_kind": self.fx_kind,
+            "part_values": self.part_values, "length": self.length, "key": self.key,
+            "scale": self.scale, "pattern_level": self.pattern_level,
+            "metronome": self.metronome,
+            "mfx_send": self.mfx_send, "amp_eg": self.amp_eg, "ifx_on": self.ifx_on,
             "motion": self.motion, "assignments": self.assignment_names,
         }
         path = self._pattern_path(index)
@@ -315,22 +463,38 @@ class Engine:
             steps = data["steps"]
             muted = data["muted"]
             values = data["values"]
-            if len(steps) != 16 or any(len(row) != 16 for row in steps) or len(muted) != 16:
+            if len(steps) != 16 or any(len(row) not in (16, 64) for row in steps) or len(muted) != 16:
                 raise ValueError("Dimensioni pattern non valide")
-            if not isinstance(values, dict) or any(key not in values or not math.isfinite(float(values[key])) for key in DEFAULTS):
+            if not isinstance(values, dict) or any(not math.isfinite(float(values.get(key, default))) for key, default in DEFAULTS.items()):
                 raise ValueError("Parametri pattern non validi")
             motion = data.get("motion", [{} for _ in range(16)])
-            if len(motion) != 16 or any(not isinstance(row, dict) for row in motion):
+            if len(motion) not in (16, 64) or any(not isinstance(row, dict) for row in motion):
                 raise ValueError("Motion pattern non valida")
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"Pattern {index:02d} non leggibile: {exc}") from exc
-        self.steps = [[bool(cell) for cell in row] for row in steps]
+        self.steps = [[bool(cell) for cell in row] + [False] * (64-len(row)) for row in steps]
         self.muted = [bool(cell) for cell in muted]
-        self.values = {key: min(1., max(0., float(values[key]))) for key in DEFAULTS}
+        self.values = {key: min(1., max(0., float(values.get(key, default)))) for key, default in DEFAULTS.items()}
+        raw_parts = data.get("part_values")
+        if isinstance(raw_parts, list) and len(raw_parts) == 16:
+            self.part_values = [{key: min(1., max(0., float(row.get(key, self.values[key])))) for key in PART_KEYS}
+                                for row in raw_parts]
+        else:
+            self.part_values = [{key: self.values[key] for key in PART_KEYS} for _ in range(16)]
+        self.length = max(1, min(4, int(data.get("length", 1))))
+        self.key = max(0, min(11, int(data.get("key", 0))))
+        self.scale = data.get("scale") if data.get("scale") in SCALES else "ionian"
+        self.pattern_level = max(0., min(1., float(data.get("pattern_level", 1))))
+        self.metronome = data.get("metronome") if data.get("metronome") in ("off", "on", "record") else "off"
+        self.values.update(self.part_values[self.part])
         self.bpm = bpm_from_value(self.values["bpm"])
         self.fx_kind = data.get("fx_kind") if data.get("fx_kind") in ("delay", "distortion") else "delay"
+        self.mfx_send = bool(data.get("mfx_send", True))
+        self.amp_eg = bool(data.get("amp_eg", True))
+        self.ifx_on = bool(data.get("ifx_on", True))
         self.motion = [{key: min(1., max(0., float(value))) for key, value in row.items()
                         if key in DEFAULTS and isinstance(value, (int, float))} for row in motion]
+        self.motion.extend({} for _ in range(64-len(self.motion)))
         self.motion_override.clear()
         self.assignments.clear()
         self.assignment_names.clear()
@@ -364,7 +528,7 @@ class Engine:
 
     def _move(self, delta: int) -> None:
         if self.pattern_select:
-            self.selected_pattern = 1 + (self.selected_pattern - 1 + delta) % 16
+            self.selected_pattern = 1 + (self.selected_pattern - 1 + delta) % PATTERN_COUNT
             self._show_pattern_select()
             return
         if not self.menu_open:
@@ -381,6 +545,8 @@ class Engine:
         _, key = MENU_FIELDS[self.menu_index]
         step = 1 / (BPM_MAX - BPM_MIN) if key == "bpm" else (.5 if key in ("filter_type", "lfo_shape") else .05)
         self.values[key] = min(1., max(0., self.values[key] + step * direction))
+        if key in PART_KEYS:
+            self.part_values[self.part][key] = self.values[key]
         if key == "bpm":
             self.bpm = bpm_from_value(self.values[key])
         if self.motion_enabled and self.playing and self.step >= 0 and key not in ("bpm", "swing"):
@@ -431,40 +597,57 @@ class Engine:
                 self.touch = None
             self._show("MFX HOLD", "ON" if self.hold else "OFF")
         elif key == "sequencer":
-            self.sequencer = not self.sequencer
-            self.pad_mode = "sequencer" if self.sequencer else "trigger"
-            self._show("PAD MODE", "SEQUENCER" if self.sequencer else "TRIGGER")
-        elif key == "trigger":
+            self.sequencer = True
+            self.pad_mode = "sequencer"
+            self._show("PAD MODE", "SEQUENCER")
+        elif key in ("trigger", "keyboard", "chord", "step_jump", "pattern_set"):
             self.sequencer = False
-            self.pad_mode = "trigger"
-            self._show("PAD MODE", "TRIGGER")
+            self.pad_mode = key
+            self._show("PAD MODE", key.replace("_", " ").upper())
         elif key == "shift_mode":
             self.sequencer = False
             self.pad_mode = "trigger" if self.pad_mode == "part_select" else "part_select"
             self._show("PAD MODE", "PART SELECT" if self.pad_mode == "part_select" else "TRIGGER")
+        elif key.startswith("step_group_") and key[-1] in "1234":
+            self.step_group = int(key[-1])
+            self._show("STEP BUTTON", f"GROUP {self.step_group}" if self.pad_mode == "pattern_set" else
+                       f"OCTAVE {self.step_group-2:+d}" if self.pad_mode in ("keyboard", "chord") else
+                       f"PAGE {self.step_group}")
+        elif key in ("lpf", "hpf", "bpf"):
+            self.values["filter_type"] = {"lpf": 0., "hpf": .5, "bpf": 1.}[key]
+            self.part_values[self.part]["filter_type"] = self.values["filter_type"]
+            self._show("FILTER TYPE", key.upper())
+        elif key in ("mfx_send", "amp_eg", "ifx_on"):
+            value = not getattr(self, key)
+            setattr(self, key, value)
+            self._show(key.replace("_", " ").upper(), "ON" if value else "OFF")
         elif key == "fx":
             self.fx_kind = "distortion" if self.fx_kind == "delay" else "delay"
             self._show("INSERT FX", self.fx_kind.upper())
         elif key == "part_mute":
-            self.muted[self.part] = not self.muted[self.part]
-            self._show(f"PART {self.part+1:02d}", "MUTED" if self.muted[self.part] else "UNMUTED")
+            self.sequencer = False
+            self.pad_mode = "part_mute" if self.pad_mode != "part_mute" else "trigger"
+            self._show("PAD MODE", "PART MUTE" if self.pad_mode == "part_mute" else "TRIGGER")
         elif key == "part_erase":
             if self.shift:
-                self.steps = [[False] * 16 for _ in range(16)]
-                self.motion = [{} for _ in range(16)]
+                self.steps = [[False] * 64 for _ in range(16)]
+                self.motion = [{} for _ in range(64)]
                 self.motion_override.clear()
                 self._show("ALL PARTS", "STEPS ERASED")
             else:
-                self.steps[self.part] = [False] * 16
-                self._show(f"PART {self.part+1:02d}", "STEPS ERASED")
+                self.sequencer = False
+                self.pad_mode = "part_erase" if self.pad_mode != "part_erase" else "trigger"
+                self._show("PAD MODE", "PART ERASE" if self.pad_mode == "part_erase" else "TRIGGER")
         elif key == "part_copy":
-            self.copy_buffer = self.steps[self.part][:]
+            self.copy_buffer = (self.steps[self.part][:], self.part_values[self.part].copy())
             self._show(f"PART {self.part+1:02d}", "STEPS COPIED")
         elif key == "part_paste":
             if self.copy_buffer is None:
                 self._show("PASTE", "COPY A PART FIRST")
             else:
-                self.steps[self.part] = self.copy_buffer[:]
+                self.steps[self.part] = self.copy_buffer[0][:]
+                self.part_values[self.part] = self.copy_buffer[1].copy()
+                self.values.update(self.part_values[self.part])
                 self._show(f"PART {self.part+1:02d}", "STEPS PASTED")
         elif key == "motion":
             self.motion_enabled = not self.motion_enabled
@@ -514,13 +697,13 @@ class Engine:
             self.menu_index = {"filter": 2, "mod": 5, "amp": 8}[key]
             self._show_menu()
         elif key == "part_prev":
-            self.part = (self.part - 1) % 16
+            self._select_part(self.part - 1)
             self._show("SELECT PART", f"{self.part+1:02d} {self._voice_name(self.part)}")
         elif key == "part_next":
-            self.part = (self.part + 1) % 16
+            self._select_part(self.part + 1)
             self._show("SELECT PART", f"{self.part+1:02d} {self._voice_name(self.part)}")
         elif key.startswith("part_") and key[5:].isdigit():
-            self.part = int(key[5:]) % 16
+            self._select_part(int(key[5:]))
             self._show("SELECT PART", f"{self.part+1:02d} {self._voice_name(self.part)}")
         else:
             raise ValueError(f"Pulsante sconosciuto: {key}")
@@ -530,11 +713,14 @@ class Engine:
             with self.lock:
                 now = time.monotonic()
                 if self.playing and now >= self.next_step:
-                    self.step = (self.step + 1) % 16
+                    self.step = (self.step + 1) % (16 * self.length)
                     self.motion_override = self.motion[self.step].copy() if self.motion_enabled else {}
                     for part in range(16):
                         if self.steps[part][self.step] and not self.muted[part]:
                             self._trigger(part, .8)
+                    if self.step % 4 == 0 and (self.metronome == "on" or self.metronome == "record" and self.recording):
+                        self.voices.append({"kind": "click", "position": 0, "velocity": .6 if self.step % 16 == 0 else .3,
+                                            "index": self.part, "values": self.part_values[self.part].copy()})
                     interval = 60 / self.bpm / 4
                     swing = self.values["swing"] * .4
                     self.next_step = now + interval * (1 + (swing if self.step % 2 == 0 else -swing))
@@ -548,19 +734,25 @@ class Engine:
             time.sleep(.003)
 
     def _note(self, x: float, velocity: float) -> None:
+        self._play_note(min(14, int(x * 15)), velocity)
+
+    def _play_note(self, index: int, velocity: float, chord: bool = False) -> None:
         if not self.powered:
             return
-        index = min(14, int(x * 15))
-        midi = 48 + 12 * (index // 5) + SCALE[index % 5]
-        frequency = 440 * 2 ** ((midi - 69) / 12)
-        self.voices.append({"kind": "note", "position": 0, "frequency": frequency,
-                            "velocity": max(.05, velocity), "index": self.part})
+        scale = SCALES[self.scale]
+        midi = 48 + self.key + 12 * (index // len(scale) + (self.step_group - 2)) + scale[index % len(scale)]
+        for semitones in ((0, 4, 7) if chord else (0,)):
+            frequency = 440 * 2 ** ((midi + semitones - 69) / 12)
+            self.voices.append({"kind": "note", "position": 0, "frequency": frequency,
+                                "velocity": min(1., max(.05, velocity)) / (2 if chord else 1),
+                                "index": self.part, "values": self.part_values[self.part].copy()})
 
     def _trigger(self, index: int, velocity: float) -> None:
         if not self.powered:
             return
         self.voices.append({"kind": "sample" if index in self.assignments else self._voice_name(index).lower(),
-                            "position": 0, "velocity": velocity, "index": index})
+                            "position": 0, "velocity": velocity, "index": index,
+                            "values": self.part_values[index].copy()})
 
     def _duplex_callback(self, indata, outdata, frames, timing, status) -> None:
         self._audio_callback(outdata, frames, timing, status, indata)
@@ -578,18 +770,22 @@ class Engine:
                 output += np.mean(input_data, axis=1) * values["input_level"] * .5
             remaining = []
             for voice in self.voices:
+                part_values = voice.get("values", values)
                 pos = voice["position"]
                 t = (np.arange(frames) + pos) / RATE
                 kind = voice["kind"]
-                decay = .08 + values["decay"] * 1.8
+                decay = .08 + part_values["decay"] * 1.8
                 if kind == "sample":
                     data = self.assignments.get(voice["index"])
                     if data is None:
                         continue
+                    if part_values["sample_reverse"] >= .5:
+                        data = data[::-1]
+                    data = data[int(part_values["sample_start"] * .95 * len(data)):]
                     fragment = np.zeros(frames, dtype=np.float32)
                     n = min(frames, len(data) - pos)
                     if n > 0:
-                        fragment[:n] = data[pos:pos+n] * (.2 + values["sample"]*.8)
+                        fragment[:n] = data[pos:pos+n] * (.2 + part_values["sample"]*.8)
                     duration = len(data)
                 elif kind == "kick":
                     phase = 2*np.pi*(55*t + 110*(1-np.exp(-t*25))/25)
@@ -606,20 +802,24 @@ class Engine:
                     bursts = (np.sin(2*np.pi*32*t) > -.25).astype(float)
                     fragment = np.random.uniform(-1, 1, frames)*bursts*.45*np.exp(-t*19)
                     duration = RATE // 2
+                elif kind == "click":
+                    fragment = np.sin(2*np.pi*1100*t)*np.exp(-t*80)
+                    duration = RATE // 12
                 else:
-                    attack = .002 + values["attack"] * .4
-                    env = np.minimum(1, t/attack) * np.exp(-t / decay)
-                    freq = voice["frequency"] * 2 ** ((values["pitch"]-.5)*2)
-                    lfo = np.sin(2*np.pi*(.2+values["lfo_rate"]*12)*t)*values["lfo_depth"]*.04
+                    attack = .002 + part_values["attack"] * .4
+                    env = (np.minimum(1, t/attack) * np.exp(-t / decay) if self.amp_eg
+                           else np.exp(-t / max(.4, decay)))
+                    freq = voice["frequency"] * 2 ** ((part_values["pitch"]-.5)*2)
+                    lfo = np.sin(2*np.pi*(.2+part_values["lfo_rate"]*12)*t)*part_values["lfo_depth"]*.04
                     fragment = np.sin(2*np.pi*freq*t + lfo) * env
                     duration = int(RATE * min(3, decay * 5))
-                output += fragment.astype(np.float32) * voice["velocity"] * .28
+                output += fragment.astype(np.float32) * voice["velocity"] * .28 * part_values["level"]
                 voice["position"] += frames
                 if voice["position"] < duration:
                     remaining.append(voice)
             self.voices = remaining
             cutoff = values["cutoff"]
-            if self.touch and self.mode == "master_fx":
+            if self.touch and self.mode == "master_fx" and self.mfx_send:
                 cutoff = self.touch[0]
             lfo_phase = (self.samples_rendered / RATE * (.2+values["lfo_rate"]*12)) % 1
             shape = round(values["lfo_shape"]*2)
@@ -651,10 +851,10 @@ class Engine:
             self.filter_z1,self.filter_z2 = z1,z2
             self.samples_rendered += frames
             signal = filtered
-            drive = 1 + (values["fx_depth"] if self.fx_kind == "distortion" else values["distortion"])*12
+            drive = 1 + (values["fx_depth"] if self.ifx_on and self.fx_kind == "distortion" else 0)*12
             signal = np.tanh(signal*drive) / max(1, drive*.35)
-            delay_mix = values["fx_depth"]*.5 if self.fx_kind == "delay" else 0
-            if self.touch and self.mode == "master_fx":
+            delay_mix = values["fx_depth"]*.5 if self.ifx_on and self.fx_kind == "delay" else 0
+            if self.touch and self.mode == "master_fx" and self.mfx_send:
                 delay_mix = self.touch[1]*.7
             delay_length = max(1, int(RATE * (.08 + values["fx_time"]*.65)))
             for i in range(frames):
@@ -662,7 +862,7 @@ class Engine:
                 self.delay[self.delay_pos] = signal[i] + delayed*.35
                 signal[i] += delayed*delay_mix
                 self.delay_pos = (self.delay_pos+1) % len(self.delay)
-            signal *= values["volume"] * values["level"]
+            signal *= values["volume"] * self.pattern_level
             pan = values["pan"]
             outdata[:, 0] = signal * math.sqrt(1-pan)
             outdata[:, 1] = signal * math.sqrt(pan)
