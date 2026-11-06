@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -14,18 +15,19 @@ from engine import Engine
 ROOT = Path(__file__).resolve().parent
 SAMPLES = ROOT / "samples"
 SAMPLES.mkdir(exist_ok=True)
-app = FastAPI(title="electribe sampler replica")
 engine = Engine(SAMPLES)
 
 
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     engine.start()
+    try:
+        yield
+    finally:
+        engine.close()
 
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    engine.close()
+app = FastAPI(title="electribe sampler replica", lifespan=lifespan)
 
 
 @app.get("/")
@@ -126,3 +128,9 @@ async def audio_stream(ws: WebSocket) -> None:
     finally:
         disconnect.cancel()
         engine.unsubscribe_audio(listener)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)
